@@ -23,8 +23,9 @@ function Board(props) {
     const [blackTimer, setBlackTimer] = useState(props.timer)
     const [gameRunning, setGameRunning] = useState('running')
     const [gameEndReason, setGameEndReason] = useState('')
+    const [evalBar, setEvalBar] = useState('0.00')
 
-    const bot = props.color.charAt(0);
+    const bot = props.color.charAt(0) === 'w' ? 'b' : 'w';
 
     const changePosition = (index) => {
         if (index >= 0 && index <= positions.length - 1) {
@@ -34,6 +35,12 @@ function Board(props) {
                 setMoveable('true')
             else
                 setMoveable('false')
+            setTimeout(() => {
+                if(index < positions.length) {
+                    uciCmd("position startpos moves" + get_moves2(index), evaler);
+                    uciCmd("eval", evaler);
+                }
+            }, 1000)
         }
     }
 
@@ -67,6 +74,7 @@ function Board(props) {
             }
             else {
             }
+            prepareMove();
         }
     }
 
@@ -118,6 +126,7 @@ function Board(props) {
                 else {
                     setTimeout(() => setBlackTimer(blackTimer + parseInt(props.increment)), 1000)
                 }
+                prepareMove();
             }
         }
     }
@@ -172,16 +181,15 @@ function Board(props) {
     }, [whiteTimer, blackTimer, chess])
 
     function uciCmd(cmd, which) {
-        // console.log('UCI: ' + cmd);
+         console.log('UCI: ' + cmd);
 
         (which || engine).postMessage(cmd);
     }
-    uciCmd("uci");
+    
 
     function get_moves() {
         let moves = "";
         let history = chess.history({ verbose: true });
-
         for (let i = 0; i < history.length; ++i) {
             let move = history[i];
             moves +=
@@ -191,17 +199,48 @@ function Board(props) {
         return moves;
     }
 
+    function get_moves2(index) {
+        let moves = "";
+        let history = chess.history({ verbose: true });
+        console.log(index)
+        console.log(history.length)
+        for (let i = 0; i < index; ++i) {
+            let move = history[i];
+            moves +=
+                " " + move.from + move.to + (move.promotion ? move.promotion : "");
+        }
+        return moves;
+    }
+    
+
     const prepareMove = () => {
         if (gameRunning) {
             if (chess.turn() === bot) {
                 // playerColor = playerColor === 'white' ? 'black' : 'white';
+                console.log("we are here now!")
                 uciCmd("position startpos moves" + get_moves());
                 uciCmd("position startpos moves" + get_moves(), evaler);
                 uciCmd("eval", evaler);
+                }
+                if (whiteTimer && blackTimer) {
+                    uciCmd(
+                      "go " +
+                        "depth " + 20 +
+                        " wtime " +
+                        whiteTimer*1000 +
+                        " winc " +
+                        props.increment*1000 +
+                        " btime " +
+                        blackTimer*1000 +
+                        " binc " +
+                        props.increment*1000
+                    );
+                  } else {
+                    uciCmd("go " + "depth " + 10);
+                  }
 
                 // isEngineRunning = true;
             }
-        }
     };
 
     evaler.onmessage = function (event) {
@@ -213,8 +252,11 @@ function Board(props) {
             line = event;
         }
 
-        // console.log('evaler: ' + line);
-
+        console.log('evaler: ' + line);
+        var evalMatch = line.match(/^Final evaluation\s+([+-][0-9]+.[0-9][0-9]|M[0-])/)
+        if(evalMatch) {
+            setEvalBar(evalMatch[1])
+        }
         /// Ignore some output.
         if (
             line === "uciok" ||
@@ -226,26 +268,39 @@ function Board(props) {
     };
 
     engine.onmessage = event => {
+        if(chess.turn() != bot) {
+            return
+        }
         let line;
         if (event && typeof event === "object") {
             line = event.data;
         } else {
             line = event;
         }
-        // console.log('Reply: ' + line);
-        //console.log(engineStatus)
+        //console.log(line)
+        console.log(engineStatus)
         if (line === "uciok") {
             engineStatus.engineLoaded = true;
         } else if (line === "readyok") {
             engineStatus.engineReady = true;
         } else {
+            //console.log(line)
             let match = line.match(/^bestmove ([a-h][1-8])([a-h][1-8])([qrbn])?/);
             /// Did the AI move?
             if (match) {
                 // isEngineRunning = false;
-                console.log(match)
                 chess.move({ from: match[1], to: match[2], promotion: match[3] });
-                setPosition(chess.fen())
+                setMoves(convertToTuples(chess.history()));
+                var newArray = positions;
+                newArray.push(chess.fen());
+                setPositions(newArray);
+                changePosition(newArray.length - 1);
+                if (chess.turn() === "b") {
+                    setTimeout(() => setWhiteTimer(whiteTimer + parseInt(props.increment)), 1000)
+                }
+                else {
+                    setTimeout(() => setBlackTimer(blackTimer + parseInt(props.increment)), 1000)
+                }
                 prepareMove();
                 uciCmd("eval", evaler);
                 //uciCmd("eval");
@@ -343,6 +398,9 @@ function Board(props) {
                 &nbsp;
                 &nbsp;
                 <span onClick={() => changePosition(positions.length - 1)} style={{ fontSize: '36px' }}>&raquo;</span>
+            </div>
+            <div style={{position: 'absolute', top: '20px', left: '-150px'}}>
+                Evaluation: {evalBar}
             </div>
             {
                 gameRunning !== 'running' ?
